@@ -48,7 +48,7 @@ class DGPBase(BayesianModel):
         Fs, Fmeans, Fvars = self.propagate(X, full_cov=full_cov, S=S)
         return Fmeans[-1], Fvars[-1]
 
-    def E_log_p_Y(self, X, Y):
+    def E_log_p_Y(self, X, Y, full_cov=False):
         """Computes Monte Carlo estimate of the expected log density of the
         data, given a Gaussian distribution for the function values.
 
@@ -59,17 +59,17 @@ class DGPBase(BayesianModel):
         this method approximates
 
             \int (\log p(y|f)) q(f) df"""
-        Fmean, Fvar = self._predict(X, full_cov=False, S=self.num_samples)
+        Fmean, Fvar = self._predict(X, full_cov=full_cov, S=self.num_samples)
         var_exp = self.likelihood.variational_expectations(Fmean, Fvar, Y)
         return tf.reduce_mean(var_exp, 0)
 
     def prior_kl(self):
         return tf.reduce_sum([layer.KL() for layer in self.layers])
 
-    def log_likelihood(self, X, Y, num_batches=None):
+    def log_likelihood(self, X, Y, full_cov=False, num_batches=None):
         """Gives a variational bound on the model likelihood."""
         # No batches for now
-        L = tf.reduce_sum(self.E_log_p_Y(X, Y))
+        L = tf.reduce_sum(self.E_log_p_Y(X, Y, full_cov))
         KL = self.prior_kl()
         if self.num_data is not None:
             num_data = tf.cast(self.num_data, KL.dtype)
@@ -80,10 +80,10 @@ class DGPBase(BayesianModel):
 
         return L * scale - KL
 
-    def elbo(self, X, Y):
+    def elbo(self, X, Y, full_cov=False):
         """ This returns the evidence lower bound (ELBO) of the log 
         marginal likelihood. """
-        return self.log_marginal_likelihood(X=X, Y=Y) 
+        return self.log_marginal_likelihood(X=X, Y=Y, full_cov=full_cov) 
 
     def predict_f(self, Xnew, num_samples, full_cov=False):
         """Returns mean and variance of the final layer."""

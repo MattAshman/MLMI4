@@ -153,35 +153,47 @@ class SVGPLayer(Layer):
         self._build_cholesky_if_needed()
 
         Kmn = Kuf(self.inducing_points, self.kernel, X)
-        A = tf.linalg.triangular_solve(self.Lmm, Kmn, lower=True)
+        # alpha(X) = k(Z,Z)^{-1}k(Z,X), = L^{-T}L^{-1}k(Z,X)
+        A = tf.linalg.triangular_solve(self.Lmm, Kmn, lower=True) # L^{-1}k(Z,X)
         if not self.white:
             A = tf.linalg.triangular_solve(tf.transpose(self.Lmm), A, lower=False)
-
+        
+        # m = alpha(X)^Tq_mu
         mean = tf.matmul(A, self.q_mu, transpose_a=True)
 
-        A_tiled = tf.tile(A[None, :, :], [self.num_outputs, 1, 1])
+        A_tiled = tf.tile(A[None, :, :], [self.num_outputs, 1, 1]) # [D_out,N,N]
         I = tf.eye(self.num_inducing, dtype=default_float())[None, :, :]
-
+        
+        # var = k(X,X) - alpha(X)^T(k(Z,Z)-q_sqrtq_sqrt^T)alpha(X)
         if self.white:
             SK = -I
         else:
+            # -k(Z,Z)
             SK = -self.Kmm_tiled
 
         if self.q_sqrt is not None:
+            # SK = -k(Z,Z) + q_sqrtq_sqrt^T
             SK += tf.matmul(self.q_sqrt, self.q_sqrt, transpose_b=True)
-
+        
+        # B = -(k(Z,Z) - q_sqrtq_sqrt^T)alpha(X)
         B = tf.matmul(SK, A_tiled)
 
         if full_cov:
-            delta_cov = tf.reduce_sum(A_tiled * B, transpose_a=True)
-            Knn = self.kernel(X, full=True)
+            # delta_cov = -alpha(X)^T(k(Z,Z) - q_sqrtq_sqrt^T)alpha(X)
+            delta_cov = tf.matmul(A_tiled, B, transpose_a=True)
+            # Knn = k(X,X)
+            Knn = self.kernel.K(X)
         else:
-            delta_cov = tf.reduce_sum(A_tiled * B, 1)
-            Knn = self.kernel(X, full=False)
+            # Summing over dimension 1 --> sum variances due to other.
+            # Is this legit?
+            # delta_cov = tf.reduce_sum(A_tiled * B, 1)
+            delta_cov = tf.linalg.diag_part(tf.matmul(A_tiled, B, 
+                transpose_a=True))
+            Knn = self.kernel.K_diag(X)
         
         var = tf.expand_dims(Knn, 0) + delta_cov
         var = tf.transpose(var)
-
+        
         return mean + self.mean_function(X), var
 
     def KL(self):
