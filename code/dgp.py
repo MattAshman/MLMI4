@@ -93,4 +93,26 @@ class DGP(DGPBase):
     """The Doubly-Stochastic Deep GP, with linear/identity mean functions at
     each layer."""
     
-    def __init__(self, kernel, likelihood, inducing_variables, 
+    def __init__(self, dim_in, kernels, likelihood, inducing_variables, 
+            num_outputs=None, mean_function=Zero(), white=False, **kwargs):
+        super().__init__(likelihood, layers, **kwargs)
+        
+        layers = self._init_layers(dim_in, kernels, inducing_variables, 
+                num_outputs=num_outputs, mean_function=mean_function, white=white)
+
+    def _init_layers(dim_in, kernels, inducing_variables, num_outputs=None, 
+            mean_function=Zero(), Layer=SVGPLayer, white=False):
+        layers = []
+        
+        # Add layers
+        for kern in kernels[:-1]:
+            mf = Identity()
+            # Initialise layers dim_out=dim_in
+            layers.append(Layer(kern, inducing_variables, dim_in, mf, 
+                white=white))
+
+        layers.append(Layer(kernels[-1], inducing_variables, num_outputs, mf,
+            white=white)
+        return layers
+
+            
