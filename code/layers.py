@@ -2,9 +2,14 @@ import pdb
 import numpy as np
 import tensorflow as tf
 import gpflow
+from gpflow import kullback_leiblers
 from gpflow.base import Module, Parameter
+from gpflow.covariances import Kuf, Kuu
 
 from gpflow.config import default_float, default_jitter
+
+gpflow.config.set_default_float(np.float64)
+gpflow.config.set_default_jitter(1e-6)
 
 class Layer(Module):
     """A base glass for DGP layers. Basic functionality for multisample 
@@ -121,7 +126,7 @@ class SVGPLayer(Layer):
             Lu = np.linalg.cholesky(Ku + np.eye(self.num_inducing) * 
                     default_jitter())
             q_sqrt = tf.tile(tf.expand_dims(Lu, 0), (num_outputs, 1, 1))
-            self.q_sqrt = Parameter(q_sqrt)
+            self.q_sqrt = Parameter(q_sqrt, transform=triangular())
 
         self.needs_build_cholesky = True
 
@@ -136,6 +141,41 @@ class SVGPLayer(Layer):
                     (self.num_outputs, 1, 1))
             self.needs_build_cholesky = False
 
-    def conditional_ND(self, X
+    def conditional_ND(self, X, full_cov=False):
+        self._build_cholesky_if_needed()
+
+        Kmn = Kuf(self.inducing_points, self.kernel, X)
+        A = tf.linalg.triangular_solve(self.Lmm, Kmn, lower=True)
+        if not self.white:
+            A = tf.linalg.triangular_solve(tf.tranpose(self.Lmm), A, lower=True)
+
+        mean = tf.matmul(A, self.q_me, tranpose_a=True)
+
+        A_tiled = tf.tile(A[None, :, :], [self.num_outputs, 1, 1])
+        I = tf.eye(self.num_inducing, dtype=default_float())[None, :, :]
+
+        if self.white:
+            SK = -I
+        else:
+            SK = -self.Kmm_tiled
+
+        if self.q_sqrt is not None:
+            SK += tf.matmul(self.q_sqrt, self.q_sqrt, tranpose_b=True)
+
+        B = tf.matmul(SK, A_tiled)
+
+        if full_cov:
+            delta_cov = tf.reduce_sum(A_tiled * B, 1)
+            Knn = self.kernel(X, full=False)
+
+        var = tf.expand_dims(Knn, 0) + delta_cov
+        var = tf.tranpose(var)
+
+        return mean + self.mean_function(X), var
+
+    def KL(self):
+        """The KL divergence from variational distribution to the prior."""
+        return kullback_leiblers.prior_kl(self.inducing_points, self.kernel,
+                self.q_mu, self.q_sqrt, whiten=self.white)
 
 

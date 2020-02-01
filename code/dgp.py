@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import gpflow
 from gpflow.models import BayesianModel
+from gpflow.mean_functions import Linear, Identity
 
 from gpflow.config import default_float, default_jitter
 
@@ -102,6 +103,8 @@ class DGP(DGPBase):
 
     def _init_layers(dim_in, kernels, inducing_variables, num_outputs=None, 
             mean_function=Zero(), Layer=SVGPLayer, white=False):
+        """Initialise DGP layers to have the same number of outputs as inputs,
+        apart from the final layer."""
         layers = []
         
         # Add layers
