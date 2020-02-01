@@ -3,9 +3,9 @@ import numpy as np
 import tensorflow as tf
 import gpflow
 from gpflow.models import BayesianModel
-from gpflow.mean_functions import Linear, Identity
-
+from gpflow.mean_functions import Linear, Identity, Zero
 from gpflow.config import default_float, default_jitter
+from layers import SVGPLayer
 
 gpflow.config.set_default_float(np.float64)
 gpflow.config.set_default_jitter(1e-6)
@@ -13,11 +13,13 @@ gpflow.config.set_default_jitter(1e-6)
 class DGPBase(BayesianModel):
     """Base class for deep gaussian processes."""
 
-    def __init__(self, likelihood, layers, **kwargs):
+    def __init__(self, likelihood, layers, num_samples=10, **kwargs):
         super().__init__(**kwargs)
 
         self.likelihood = likelihood
         self.layers = layers
+        self.num_samples = num_samples # Is this needed here?
+        self.num_data = None
 
     def propagate(self, X, full_cov=False, S=1, zs=None):
         """Propagate input X through layers of the DGP S times. 
@@ -29,7 +31,7 @@ class DGPBase(BayesianModel):
         :zs: A tensor, samples from N(0,1) to use in the reparameterisation
         trick."""
         sX = tf.tile(tf.expand_dims(X, 0), [S, 1, 1]) # [S,N,D]
-        Fs, Fmeans, Fvar = [], [], []
+        Fs, Fmeans, Fvars = [], [], []
         F = sX
         zs = zs or [None, ] * len(self.layers) # [None, None, ..., None]
         for layer, z in zip(self.layers, zs):
@@ -75,12 +77,13 @@ class DGPBase(BayesianModel):
             scale = num_data / minibatch_size
         else:
             scale = tf.cast(1.0, KL.dtype)
+
         return L * scale - KL
 
     def elbo(self, X, Y):
         """ This returns the evidence lower bound (ELBO) of the log 
         marginal likelihood. """
-        return 
+        return self.log_marginal_likelihood(X=X, Y=Y) 
 
     def predict_f(self, Xnew, num_samples, full_cov=False):
         """Returns mean and variance of the final layer."""
@@ -95,13 +98,13 @@ class DGP(DGPBase):
     each layer."""
     
     def __init__(self, dim_in, kernels, likelihood, inducing_variables, 
-            num_outputs=None, mean_function=Zero(), white=False, **kwargs):
-        super().__init__(likelihood, layers, **kwargs)
-        
+            num_outputs, mean_function=Zero(), white=False, **kwargs):
         layers = self._init_layers(dim_in, kernels, inducing_variables, 
                 num_outputs=num_outputs, mean_function=mean_function, white=white)
 
-    def _init_layers(dim_in, kernels, inducing_variables, num_outputs=None, 
+        super().__init__(likelihood, layers, **kwargs)
+        
+    def _init_layers(self, dim_in, kernels, inducing_variables, num_outputs=None, 
             mean_function=Zero(), Layer=SVGPLayer, white=False):
         """Initialise DGP layers to have the same number of outputs as inputs,
         apart from the final layer."""
@@ -115,7 +118,7 @@ class DGP(DGPBase):
                 white=white))
 
         layers.append(Layer(kernels[-1], inducing_variables, num_outputs, mf,
-            white=white)
+            white=white))
         return layers
 
             

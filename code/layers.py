@@ -5,8 +5,10 @@ import gpflow
 from gpflow import kullback_leiblers
 from gpflow.base import Module, Parameter
 from gpflow.covariances import Kuf, Kuu
-
+from gpflow.utilities import positive, triangular
+from gpflow.models.util import inducingpoint_wrapper
 from gpflow.config import default_float, default_jitter
+from utilities import reparameterise
 
 gpflow.config.set_default_float(np.float64)
 gpflow.config.set_default_jitter(1e-6)
@@ -92,7 +94,7 @@ class SVGPLayer(Layer):
     points.
 
     :kernel: A gpflow.kernel, the kernel for the layer.
-    :Z: A tensor, the inducing points. [M,D_in]
+    :inducing_variables: A tensor, the inducing points. [M,D_in]
     :num_outputs: The number of GP outputs.
     :mean_function: A gpflow.mean_function, the mean function for the layer.
     """
@@ -108,8 +110,11 @@ class SVGPLayer(Layer):
         self.q_mu = Parameter(q_mu, dtype=default_float())
 
         # Initialise q_sqrt to identity function
-        q_sqrt = tf.tile(tf.expand_dims(tf.eye(self.num_inducing, 
-            dtype=default_float()), 0), (num_outputs, 1, 1))
+        #q_sqrt = tf.tile(tf.expand_dims(tf.eye(self.num_inducing, 
+        #    dtype=default_float()), 0), (num_outputs, 1, 1))
+        q_sqrt = [np.eye(self.num_inducing, dtype=default_float()) for _ in 
+                range(num_outputs)]
+        q_sqrt = np.array(q_sqrt)
         # Store as lower triangular matrix L.
         self.q_sqrt = Parameter(q_sqrt, transform=triangular())
 
@@ -122,15 +127,17 @@ class SVGPLayer(Layer):
 
         # Initialise to prior (Ku) + jitter.
         if not self.white:
-            Ku = self.kernel.K(Z)
+            Ku = self.kernel.K(inducing_variables)
             Lu = np.linalg.cholesky(Ku + np.eye(self.num_inducing) * 
                     default_jitter())
-            q_sqrt = tf.tile(tf.expand_dims(Lu, 0), (num_outputs, 1, 1))
+            #q_sqrt = tf.tile(tf.expand_dims(Lu, 0), (num_outputs, 1, 1))
+            q_sqrt = [Lu for _ in range(num_outputs)]
+            q_sqrt = np.array(q_sqrt)
             self.q_sqrt = Parameter(q_sqrt, transform=triangular())
 
         self.needs_build_cholesky = True
 
-    def build_cholesky_if_needed(self):
+    def _build_cholesky_if_needed(self):
         if self.needs_build_cholesky:
             self.Kmm = Kuu(self.inducing_points, self.kernel, 
                     jitter=default_jitter())
@@ -142,14 +149,15 @@ class SVGPLayer(Layer):
             self.needs_build_cholesky = False
 
     def conditional_ND(self, X, full_cov=False):
+        # Try this.
         self._build_cholesky_if_needed()
 
         Kmn = Kuf(self.inducing_points, self.kernel, X)
         A = tf.linalg.triangular_solve(self.Lmm, Kmn, lower=True)
         if not self.white:
-            A = tf.linalg.triangular_solve(tf.tranpose(self.Lmm), A, lower=True)
+            A = tf.linalg.triangular_solve(tf.transpose(self.Lmm), A, lower=False)
 
-        mean = tf.matmul(A, self.q_me, tranpose_a=True)
+        mean = tf.matmul(A, self.q_mu, transpose_a=True)
 
         A_tiled = tf.tile(A[None, :, :], [self.num_outputs, 1, 1])
         I = tf.eye(self.num_inducing, dtype=default_float())[None, :, :]
@@ -160,16 +168,19 @@ class SVGPLayer(Layer):
             SK = -self.Kmm_tiled
 
         if self.q_sqrt is not None:
-            SK += tf.matmul(self.q_sqrt, self.q_sqrt, tranpose_b=True)
+            SK += tf.matmul(self.q_sqrt, self.q_sqrt, transpose_b=True)
 
         B = tf.matmul(SK, A_tiled)
 
         if full_cov:
+            delta_cov = tf.reduce_sum(A_tiled * B, transpose_a=True)
+            Knn = self.kernel(X, full=True)
+        else:
             delta_cov = tf.reduce_sum(A_tiled * B, 1)
             Knn = self.kernel(X, full=False)
-
+        
         var = tf.expand_dims(Knn, 0) + delta_cov
-        var = tf.tranpose(var)
+        var = tf.transpose(var)
 
         return mean + self.mean_function(X), var
 
