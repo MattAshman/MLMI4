@@ -135,63 +135,56 @@ class SVGPLayer(Layer):
             q_sqrt = np.array(q_sqrt)
             self.q_sqrt = Parameter(q_sqrt, transform=triangular())
 
-        self.needs_build_cholesky = True
-
-    def _build_cholesky_if_needed(self):
-        if self.needs_build_cholesky:
-            self.Kmm = Kuu(self.inducing_points, self.kernel, 
-                    jitter=default_jitter())
-            self.Lmm = tf.linalg.cholesky(self.Kmm)
-            self.Kmm_tiled = tf.tile(tf.expand_dims(self.Kmm, 0), 
-                    (self.num_outputs, 1, 1))
-            self.Lmm_tiled = tf.tile(tf.expand_dims(self.Lmm, 0), 
-                    (self.num_outputs, 1, 1))
-            self.needs_build_cholesky = False
-
     def conditional_ND(self, X, full_cov=False):
-        # Try this.
-        self._build_cholesky_if_needed()
+        # X is [S,N,D]
+        Kmm = Kuu(self.inducing_points, self.kernel, jitter=default_jitter())
+        Lmm = tf.linalg.cholesky(Kmm)
+        Kmm_tiled = tf.tile(tf.expand_dims(Kmm, 0), (self.num_outputs, 1, 1))
+        Lmm_tiled = tf.tile(tf.expand_dims(Lmm, 0), (self.num_outputs, 1, 1))
 
-        Kmn = Kuf(self.inducing_points, self.kernel, X)
+        Kmn = Kuf(self.inducing_points, self.kernel, X) # K(Z,X)
         # alpha(X) = k(Z,Z)^{-1}k(Z,X), = L^{-T}L^{-1}k(Z,X)
-        A = tf.linalg.triangular_solve(self.Lmm, Kmn, lower=True) # L^{-1}k(Z,X)
+        A = tf.linalg.triangular_solve(Lmm, Kmn, lower=True) # L^{-1}k(Z,X)
         if not self.white:
-            A = tf.linalg.triangular_solve(tf.transpose(self.Lmm), A, lower=False)
+            # L^{-T}L^{-1}K(Z,X) is [M,N]
+            A = tf.linalg.triangular_solve(tf.transpose(Lmm), A, lower=False)
         
-        # m = alpha(X)^Tq_mu
-        mean = tf.matmul(A, self.q_mu, transpose_a=True)
-
-        A_tiled = tf.tile(A[None, :, :], [self.num_outputs, 1, 1]) # [D_out,N,N]
+        # m = alpha(X)^T(q_mu - m(Z)) = alpha(X)^T(q_mu) if zero mean function.
+        mean = tf.matmul(A, self.q_mu, transpose_a=True) # [N]
+        
+        # [D_out,M,N]
+        A_tiled = tf.tile(A[None, :, :], [self.num_outputs, 1, 1]) 
         I = tf.eye(self.num_inducing, dtype=default_float())[None, :, :]
-        
+       
         # var = k(X,X) - alpha(X)^T(k(Z,Z)-q_sqrtq_sqrt^T)alpha(X)
         if self.white:
             SK = -I
         else:
             # -k(Z,Z)
-            SK = -self.Kmm_tiled
+            SK = -Kmm_tiled # [D_out,M,M]
 
         if self.q_sqrt is not None:
             # SK = -k(Z,Z) + q_sqrtq_sqrt^T
-            SK += tf.matmul(self.q_sqrt, self.q_sqrt, transpose_b=True)
+            # [D_out,M,M]
+            SK += tf.matmul(self.q_sqrt, self.q_sqrt, transpose_b=True) 
         
         # B = -(k(Z,Z) - q_sqrtq_sqrt^T)alpha(X)
-        B = tf.matmul(SK, A_tiled)
+        B = tf.matmul(SK, A_tiled) # [D_out,M,N]
 
         if full_cov:
             # delta_cov = -alpha(X)^T(k(Z,Z) - q_sqrtq_sqrt^T)alpha(X)
-            delta_cov = tf.matmul(A_tiled, B, transpose_a=True)
+            delta_cov = tf.matmul(A_tiled, B, transpose_a=True) # [D_out,N,N]
             # Knn = k(X,X)
             Knn = self.kernel.K(X)
         else:
             # Summing over dimension 1 --> sum variances due to other.
             # Is this legit?
-            # delta_cov = tf.reduce_sum(A_tiled * B, 1)
-            delta_cov = tf.linalg.diag_part(tf.matmul(A_tiled, B, 
-                transpose_a=True))
-            Knn = self.kernel.K_diag(X)
-        
-        var = tf.expand_dims(Knn, 0) + delta_cov
+            delta_cov = tf.reduce_sum(A_tiled * B, 1)
+            #delta_cov = tf.linalg.diag_part(tf.matmul(A_tiled, B, 
+            #    transpose_a=True)) # [D_out,N]
+            Knn = self.kernel.K_diag(X) # [N]
+       
+        var = tf.expand_dims(Knn, 0) + delta_cov # [D_out,N]
         var = tf.transpose(var)
         
         return mean + self.mean_function(X), var
