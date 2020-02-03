@@ -13,13 +13,14 @@ gpflow.config.set_default_jitter(1e-6)
 class DGPBase(BayesianModel):
     """Base class for deep gaussian processes."""
 
-    def __init__(self, likelihood, layers, num_samples=10, **kwargs):
+    def __init__(self, likelihood, layers, num_samples=10, num_data=None, 
+            **kwargs):
         super().__init__(**kwargs)
 
         self.likelihood = likelihood
         self.layers = layers
         self.num_samples = num_samples # Is this needed here?
-        self.num_data = None
+        self.num_data = num_data
 
     def propagate(self, X, full_cov=False, S=1, zs=None):
         """Propagate input X through layers of the DGP S times. 
@@ -99,6 +100,7 @@ class DGP(DGPBase):
     
     def __init__(self, dim_in, kernels, likelihood, inducing_variables, 
             num_outputs, mean_function=Zero(), white=False, **kwargs):
+
         layers = self._init_layers(dim_in, kernels, inducing_variables, 
                 num_outputs=num_outputs, mean_function=mean_function, white=white)
 
@@ -114,11 +116,13 @@ class DGP(DGPBase):
         for kern in kernels[:-1]:
             mf = Identity()
             # Initialise layers dim_out=dim_in
+            # Use Identity mean function when input and output dimensions
+            # are the same.
             layers.append(Layer(kern, inducing_variables, dim_in, mf, 
                 white=white))
 
-        layers.append(Layer(kernels[-1], inducing_variables, num_outputs, mf,
-            white=white))
+        layers.append(Layer(kernels[-1], inducing_variables, num_outputs,
+            mean_function, white=white))
         return layers
 
             
