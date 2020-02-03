@@ -89,10 +89,20 @@ class DGPBase(BayesianModel):
     def predict_f(self, Xnew, num_samples, full_cov=False):
         """Returns mean and variance of the final layer."""
         return self._predict(Xnew, full_cov=full_cov, S=num_samples)
+    
+    def predict_y(self, Xnew, num_samples, full_cov=False):
+        Fmean, Fvar = self._predict(Xnew, full_cov=full_cov, S=num_samples)
+        return self.likelihood.predict_mean_and_var(Fmean,Fvar)
 
     def predict_all_layers(self, Xnew, num_samples, full_cov=False):
         """Returns mean and variance of all layers."""
         return self.propagate(Xnew, full_cov=full_cov, S=num_samples)
+    
+    def predict_density(self, Xnew, Ynew, num_samples, full_cov=False):
+        Fmean, Fvar = self._predict(Xnew, full_cov=full_cov, S=num_samples)
+        l = self.likelihood.predict_density(Fmean, Fvar, Ynew)
+        log_num_samples = tf.log(tf.cast(num_samples, l.dtype))
+        return tf.reduce_logsumexp(l - log_num_samples, axis=0)
 
 class DGP(DGPBase):
     """The Doubly-Stochastic Deep GP, with linear/identity mean functions at
