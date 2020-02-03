@@ -1,3 +1,6 @@
 # Ignore virtual environment files
 mlmi4-env/*
 */__pycache__/*
+
+# Ignore dataset files
+data/
