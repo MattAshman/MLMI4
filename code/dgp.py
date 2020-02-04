@@ -6,6 +6,8 @@ from gpflow.models import BayesianModel
 from gpflow.mean_functions import Linear, Identity, Zero
 from gpflow.config import default_float, default_jitter
 from layers import SVGPLayer
+from utilities import BroadcastingLikelihood
+from gpflow.utilities import set_trainable
 
 gpflow.config.set_default_float(np.float64)
 gpflow.config.set_default_jitter(1e-6)
@@ -13,14 +15,24 @@ gpflow.config.set_default_jitter(1e-6)
 class DGPBase(BayesianModel):
     """Base class for deep gaussian processes."""
 
-    def __init__(self, likelihood, layers, num_samples=10, num_data=None, 
+    def __init__(self, X, Y, likelihood, layers, 
+                 num_samples=10, num_data=None, 
+                 minibatch_size=None,
             **kwargs):
         super().__init__(**kwargs)
 
-        self.likelihood = likelihood
+        self.likelihood = BroadcastingLikelihood(likelihood)
         self.layers = layers
         self.num_samples = num_samples # Is this needed here?
-        self.num_data = num_data
+        self.num_data = num_data or X.shape[0]
+        self.minibatch_size = minibatch_size
+        
+        if self.minibatch_size:
+            train_ds = tf.data.Dataset.from_tensor_slices((X, Y)).repeat().shuffle(10*self.minibatch_size)
+            train_it = iter(train_ds.batch(self.minibatch_size))
+            self.X, self.Y = next(train_it)
+        else:
+            self.X, self.Y = X, Y
 
     def propagate(self, X, full_cov=False, S=1, zs=None):
         """Propagate input X through layers of the DGP S times. 
@@ -67,24 +79,23 @@ class DGPBase(BayesianModel):
     def prior_kl(self):
         return tf.reduce_sum([layer.KL() for layer in self.layers])
 
-    def log_likelihood(self, X, Y, full_cov=False, num_batches=None):
+    def log_likelihood(self, full_cov=False):
         """Gives a variational bound on the model likelihood."""
-        # No batches for now
-        L = tf.reduce_sum(self.E_log_p_Y(X, Y, full_cov))
+        L = tf.reduce_sum(self.E_log_p_Y(self.X, self.Y, full_cov))
         KL = self.prior_kl()
         if self.num_data is not None:
             num_data = tf.cast(self.num_data, KL.dtype)
-            minibatch_size = tf.cast(tf.shape(X)[0], KL.dtype)
+            minibatch_size = tf.cast(self.minibatch_size, KL.dtype)
             scale = num_data / minibatch_size
         else:
             scale = tf.cast(1.0, KL.dtype)
 
         return L * scale - KL
 
-    def elbo(self, X, Y, full_cov=False):
+    def elbo(self, full_cov=False):
         """ This returns the evidence lower bound (ELBO) of the log 
         marginal likelihood. """
-        return self.log_marginal_likelihood(X=X, Y=Y, full_cov=full_cov) 
+        return self.log_marginal_likelihood(full_cov=full_cov) 
 
     def predict_f(self, Xnew, num_samples, full_cov=False):
         """Returns mean and variance of the final layer."""
@@ -101,38 +112,53 @@ class DGPBase(BayesianModel):
     def predict_density(self, Xnew, Ynew, num_samples, full_cov=False):
         Fmean, Fvar = self._predict(Xnew, full_cov=full_cov, S=num_samples)
         l = self.likelihood.predict_density(Fmean, Fvar, Ynew)
-        log_num_samples = tf.log(tf.cast(num_samples, l.dtype))
+        log_num_samples = tf.math.log(tf.cast(num_samples, l.dtype))
         return tf.reduce_logsumexp(l - log_num_samples, axis=0)
 
 class DGP(DGPBase):
     """The Doubly-Stochastic Deep GP, with linear/identity mean functions at
     each layer."""
     
-    def __init__(self, dim_in, kernels, likelihood, inducing_variables, 
-            num_outputs, mean_function=Zero(), white=False, **kwargs):
+    def __init__(self, X, Y, Z, dims, kernels, likelihood,
+                 mean_function=Zero(), white=False, **kwargs):
 
-        layers = self._init_layers(dim_in, kernels, inducing_variables, 
-                num_outputs=num_outputs, mean_function=mean_function, white=white)
+        layers = self._init_layers(X, Y, Z, dims, kernels,
+                                   mean_function=mean_function, white=white)
 
-        super().__init__(likelihood, layers, **kwargs)
+        super().__init__(X, Y, likelihood, layers, **kwargs)
         
-    def _init_layers(self, dim_in, kernels, inducing_variables, num_outputs=None, 
-            mean_function=Zero(), Layer=SVGPLayer, white=False):
+    def _init_layers(self, X, Y, Z, dims, kernels, 
+                     mean_function=Zero(), Layer=SVGPLayer, white=False):
         """Initialise DGP layers to have the same number of outputs as inputs,
         apart from the final layer."""
         layers = []
-        
-        # Add layers
-        for kern in kernels[:-1]:
-            mf = Identity()
-            # Initialise layers dim_out=dim_in
-            # Use Identity mean function when input and output dimensions
-            # are the same.
-            layers.append(Layer(kern, inducing_variables, dim_in, mf, 
-                white=white))
 
-        layers.append(Layer(kernels[-1], inducing_variables, num_outputs,
-            mean_function, white=white))
+        X_running, Z_running = X.copy(), Z.copy()
+        for i in range(len(kernels)-1):
+            dim_in, dim_out, kern = dims[i], dims[i+1], kernels[i]
+            if dim_in == dim_out:
+                mf = Identity()
+
+            else:
+                if dim_in > dim_out:  # stepping down, use the pca projection
+                    _, _, V = np.linalg.svd(X_running, full_matrices=False)
+                    W = V[:dim_out, :].T
+
+                else: # stepping up, use identity + padding
+                    W = np.concatenate([np.eye(dim_in), np.zeros((dim_in, dim_out - dim_in))], 1)
+
+                mf = Linear(W)
+                set_trainable(mf.A, False)
+                set_trainable(mf.b, False)
+
+            layers.append(Layer(kern, Z_running, dim_out, mf, white=white))
+
+            if dim_in != dim_out:
+                Z_running = Z_running.dot(W)
+                X_running = X_running.dot(W)
+
+        # final layer
+        layers.append(Layer(kernels[-1], Z_running, dims[-1], mean_function, white=white))
         return layers
 
             
