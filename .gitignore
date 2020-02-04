@@ -4,3 +4,4 @@ mlmi4-env/*
 
 # Ignore dataset files
 data/
+tmp/
