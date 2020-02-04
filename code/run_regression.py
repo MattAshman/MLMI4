@@ -75,34 +75,37 @@ def main(args):
                 grad = tape.gradient(obj, model.trainable_variables)
             optimiser.apply_gradients(zip(grad, model.trainable_variables))
 
-        def monitored_training_loop(model, train_dataset, logdir, epochs, 
-                logging_epoch_freq):
+        def monitored_training_loop(model, train_dataset, logdir, iterations, 
+                logging_iter_freq):
             # TODO: use tensorboard to log trainables and performance
             tf_optimisation_step = tf.function(optimisation_step)
             batches = iter(train_dataset)
 
-            for epoch in range(epochs):
+            for i in range(iterations):
                 X, Y = next(batches)
                 tf_optimisation_step(model, X, Y)
 
-                epoch_id = epoch + 1
-                if epoch_id % logging_epoch_freq == 0:
-                    tf.print(f'Epoch {epoch_id}: ELBO (batch) {model.elbo(X, Y)}')
+                iter_id = i + 1
+                if iter_id % logging_iter_freq == 0:
+                    tf.print(f'Epoch {iter_id}: ELBO (batch) {model.elbo(X, Y)}')
 
         print('Training DGP model...')
         t0 = time.time()
         monitored_training_loop(dgp_model, train_dataset, logdir=args.log_dir, 
-                epochs=args.epochs, logging_epoch_freq=args.logging_epoch_freq)
+                iterations=args.iterations, 
+                logging_iter_freq=args.logging_iter_freq)
         t1 = time.time()
         print('Time taken to train: {}'.format(t1 - t0))
         outfile2.write('Split {}: {}\n'.format(i+1, t1-t0))
         outfile2.flush()
         os.fsync(outfile2.fileno())
         running_time += t1 - t0
-
-        test_ll = dgp_model.log_likelihood(Xs, Ys)
-        print('Average test log likelihood: {}'.format(test_ll / Xs.shape[0]))
-        outfile1.write('Split {}: {}\n'.format(i+1, test_ll / Xs.shape[0]))
+        
+        m, v = dgp_model.predict_y(Xs, num_samples=args.test_samples)
+        test_nll = np.mean(logsumexp(norm.logpdf(Ys * Y_std, m * Y_std, 
+                v ** 0.5 * Y_std), 0, b=1 / float(args.test_samples)))
+        print('Average test log likelihood: {}'.format(test_nll))
+        outfile1.write('Split {}: {}\n'.format(i+1, test_nll))
         outfile1.flush()
         os.fsync(outfile1.fileno())
         running_loss += t1 - t0
@@ -127,14 +130,16 @@ if __name__ == '__main__':
         help='Number of samples to propagate.')
     parser.add_argument('--learning_rate', type=float, default=0.01,
         help='Learning rate for optimiser.')
-    parser.add_argument('--epochs', type=int, default=10000, 
-        help='Number of training epochs.')
+    parser.add_argument('--iterations', type=int, default=10000, 
+        help='Number of training iterations.')
     parser.add_argument('--log_dir', default='./log/', 
         help='Directory log files are written to.')
-    parser.add_argument('--logging_epoch_freq', type=int, default=500,
-        help='Number of epochs between training logs.')
+    parser.add_argument('--logging_iter_freq', type=int, default=500,
+        help='Number of iterations between training logs.')
     parser.add_argument('--M', type=int, default=10000, 
         help='Minibatch size.')
+    parser.add_argument('--test_samples', type=int, default=100, 
+        help='Number of test samples to use.')
 
     args = parser.parse_args()
     main(args)
