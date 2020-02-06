@@ -15,7 +15,7 @@ gpflow.config.set_default_jitter(1e-6)
 class DGPBase(BayesianModel):
     """Base class for deep gaussian processes."""
 
-    def __init__(self, X, Y, likelihood, layers, 
+    def __init__(self, likelihood, layers, 
                  num_samples=10, num_data=None, 
                  minibatch_size=None,
             **kwargs):
@@ -27,12 +27,6 @@ class DGPBase(BayesianModel):
         self.num_data = num_data or X.shape[0]
         self.minibatch_size = minibatch_size
         
-        if self.minibatch_size:
-            train_ds = tf.data.Dataset.from_tensor_slices((X, Y)).repeat().shuffle(10*self.minibatch_size)
-            train_it = iter(train_ds.batch(self.minibatch_size))
-            self.X, self.Y = next(train_it)
-        else:
-            self.X, self.Y = X, Y
 
     def propagate(self, X, full_cov=False, S=1, zs=None):
         """Propagate input X through layers of the DGP S times. 
@@ -79,9 +73,9 @@ class DGPBase(BayesianModel):
     def prior_kl(self):
         return tf.reduce_sum([layer.KL() for layer in self.layers])
 
-    def log_likelihood(self, full_cov=False):
+    def log_likelihood(self, X, Y, full_cov=False):
         """Gives a variational bound on the model likelihood."""
-        L = tf.reduce_sum(self.E_log_p_Y(self.X, self.Y, full_cov))
+        L = tf.reduce_sum(self.E_log_p_Y(X, Y, full_cov))
         KL = self.prior_kl()
         if self.num_data is not None:
             num_data = tf.cast(self.num_data, KL.dtype)
@@ -92,10 +86,10 @@ class DGPBase(BayesianModel):
 
         return L * scale - KL
 
-    def elbo(self, full_cov=False):
+    def elbo(self, X, Y, full_cov=False):
         """ This returns the evidence lower bound (ELBO) of the log 
         marginal likelihood. """
-        return self.log_marginal_likelihood(full_cov=full_cov) 
+        return self.log_marginal_likelihood(X, Y, full_cov=full_cov) 
 
     def predict_f(self, Xnew, num_samples, full_cov=False):
         """Returns mean and variance of the final layer."""
@@ -125,7 +119,7 @@ class DGP(DGPBase):
         layers = self._init_layers(X, Y, Z, dims, kernels,
                                    mean_function=mean_function, white=white)
 
-        super().__init__(X, Y, likelihood, layers, **kwargs)
+        super().__init__(likelihood, layers, **kwargs)
         
     def _init_layers(self, X, Y, Z, dims, kernels, 
                      mean_function=Zero(), Layer=SVGPLayer, white=False):
