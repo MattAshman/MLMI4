@@ -87,7 +87,8 @@ def main(args):
 
                 iter_id = i + 1
                 if iter_id % logging_iter_freq == 0:
-                    tf.print(f'Epoch {iter_id}: ELBO (batch) {model.elbo(X, Y)}')
+                    tf.print(f'Iteration {iter_id}: ELBO (batch)\
+                            {model.elbo(X, Y)}')
 
         print('Training DGP model...')
         t0 = time.time()
@@ -108,7 +109,7 @@ def main(args):
         outfile1.write('Split {}: {}\n'.format(i+1, test_nll))
         outfile1.flush()
         os.fsync(outfile1.fileno())
-        running_loss += t1 - t0
+        running_loss += test_nll
     
     outfile1.write('Average: {}\n'.format(running_loss / args.splits))
     outfile2.write('Average: {}\n'.format(running_time / args.splits))
