@@ -92,13 +92,8 @@ def main(args):
 
                 iter_id = i + 1
                 if iter_id % logging_iter_freq == 0:
-<<<<<<< HEAD
                     print('Epoch {}: ELBO (batch) {}'.format(iter_id,
                         model.elbo(X, Y)))
-=======
-                    tf.print(f'Iteration {iter_id}: ELBO (batch)\
-                            {model.elbo(X, Y)}')
->>>>>>> c4a4e0fe05e392013cdcdca41cc0c2969de68c70
 
         print('Training DGP model...')
         t0 = time.time()
@@ -136,7 +131,6 @@ def main(args):
         outfile1.write('Split {}: {}\n'.format(i+1, test_err))
         outfile1.flush()
         os.fsync(outfile1.fileno())
-<<<<<<< HEAD
         running_err += test_err
 
         test_nll = np.mean(logsumexp(norm.logpdf(Ys * Y_std, mean_SND * Y_std, 
@@ -145,8 +139,6 @@ def main(args):
         outfile2.write('Split {}: {}\n'.format(i+1, test_nll))
         outfile2.flush()
         os.fsync(outfile2.fileno())
-=======
->>>>>>> c4a4e0fe05e392013cdcdca41cc0c2969de68c70
         running_loss += test_nll
     
     outfile1.write('Average: {}\n'.format(running_err / args.splits))
