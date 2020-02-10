@@ -17,9 +17,10 @@ import os
 import pdb
 import pandas
 
-from io import BytesIO
+from io import BytesIO, StringIO
 from urllib.request import urlopen
 from zipfile import ZipFile
+from scipy.io import arff
 
 import csv
 
@@ -136,9 +137,10 @@ class Kin8mn(Dataset):
 
     def download_data(self):
 
-        url = 'http://mldata.org/repository/data/download/csv/uci-20070111-kin8nm'
-
-        data = pandas.read_csv(url, header=None).values
+        url = ' https://www.openml.org/data/download/3626/dataset_2175_kin8nm.arff'
+        ftpstream = urlopen(url)
+        data, meta = arff.loadarff(StringIO(ftpstream.read().decode(
+            'utf-8')))
 
         with open(self.csv_file_path(self.name), 'w') as f:
             csv.writer(f).writerows(data)

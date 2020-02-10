@@ -131,7 +131,6 @@ def main(args):
         var_SDN = np.concatenate(vars, 1)
         mean_ND = np.mean(mean_SND, 0)
         
-        pdb.set_trace()
         test_err = np.mean(Y_std * np.mean((Ys - mean_ND) ** 2.0) ** 0.5)
         print('Average RMSE: {}'.format(test_err))
         outfile1.write('Split {}: {}\n'.format(i+1, test_err))
