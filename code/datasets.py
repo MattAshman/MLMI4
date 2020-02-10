@@ -14,6 +14,7 @@
 
 import numpy as np
 import os
+import pdb
 import pandas
 
 from io import BytesIO
@@ -226,6 +227,34 @@ class WineWhite(Dataset):
         with open(self.csv_file_path(self.name), 'w') as f:
             csv.writer(f).writerows(data)
 
+class Year(Dataset):
+    def __init__(self):
+        self.name, self.N, self.D = 'year', 463810, 90
+        self.type = 'regression'
+
+    def download_data(self):
+
+        url = '{}{}'.format(uci_base, '00203/YearPredictionMSD.txt.zip')
+
+        with urlopen(url) as zipresp:
+            with ZipFile(BytesIO(zipresp.read())) as zfile:
+                zfile.extractall('/tmp/')
+
+        data = pandas.read_csv('/tmp/YearPredictionMSD.txt', sep=',', 
+                header=None).values
+        data = data[:, :-1]
+
+        with open(self.csv_file_path(self.name), 'w') as f:
+            csv.writer(f).writerows(data)
+
+    def split(self, full_data, seed, split, prop):
+        X = full_data['X'][:self.N, :]
+        Xs = full_data['X'][self.N:, :]
+
+        Y = full_data['Y'][:self.N, :]
+        Ys = full_data['Y'][self.N:, :]
+
+        return {'X':X, 'Xs':Xs, 'Y':Y, 'Ys':Ys}
 
 class Datasets(object):
     def __init__(self, data_path='/data/'):
@@ -243,6 +272,7 @@ class Datasets(object):
         datasets.append(Protein())
         datasets.append(WineRed())
         datasets.append(WineWhite())
+        datasets.append(Year())
 
         self.all_datasets = {}
         for d in datasets:

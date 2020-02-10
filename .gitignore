@@ -1,5 +1,5 @@
 # Ignore virtual environment files
-mlmi4-env/*
+*-env
 */__pycache__/*
 
 # Ignore dataset files
@@ -8,3 +8,9 @@ tmp/
 
 # Not sure what these files are. Don't want them.
 *.DS_store
+
+# Ignore bash scripts
+*.sh*
+
+# Ignore backups
+*~
