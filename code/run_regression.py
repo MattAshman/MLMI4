@@ -47,7 +47,6 @@ def main(args):
         print('Getting dataset...')
         data = datasets.all_datasets[args.dataset].get_data(i)
         X, Y, Xs, Ys, Y_std = [data[_] for _ in ['X', 'Y', 'Xs', 'Ys', 'Y_std']]
-        pdb.set_trace()
         Z = kmeans2(X, args.num_inducing, minit='points')[0]
 
         # set up batches
@@ -59,12 +58,18 @@ def main(args):
 
         print('Setting up DGP model...')
         kernels = []
+        dims = []
+        hidden_dim = X.shape[1] if X.shape[1] < args.max_dim else args.max_dim
         for l in range(args.num_layers):
             kernels.append(SquaredExponential() + White(variance=1e-5))
+            if l == 0:
+                dims.append(X.shape[1])
+            else:
+                dims.append(hidden_dim)
+        dims.append(Y.shape[1])
 
-        dgp_model = DGP(X.shape[1], kernels, Gaussian(variance=0.05), Z, 
-                num_outputs=Y.shape[1], num_samples=args.num_samples,
-                num_data=X.shape[0])
+        dgp_model = DGP(X, Y, Z, dims, kernels, Gaussian(variance=0.05),
+                num_samples=args.num_samples, num_data=X.shape[0])
 
         # initialise inner layers almost deterministically
         for layer in dgp_model.layers[:-1]:
@@ -126,6 +131,7 @@ def main(args):
         var_SDN = np.concatenate(vars, 1)
         mean_ND = np.mean(mean_SND, 0)
         
+        pdb.set_trace()
         test_err = np.mean(Y_std * np.mean((Ys - mean_ND) ** 2.0) ** 0.5)
         print('Average RMSE: {}'.format(test_err))
         outfile1.write('Split {}: {}\n'.format(i+1, test_err))
@@ -175,6 +181,8 @@ if __name__ == '__main__':
         help='Number of test samples to use.')
     parser.add_argument('--test_batch_size', type=int, default=100,
         help='Batch size to apply to test data.')
+    parser.add_argument('--max_dim', type=int, default=30,
+        help='Maximum dimension of latent variables.')
 
     args = parser.parse_args()
     main(args)

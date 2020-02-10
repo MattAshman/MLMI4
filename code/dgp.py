@@ -5,6 +5,7 @@ import gpflow
 from gpflow.models import BayesianModel
 from gpflow.mean_functions import Linear, Identity, Zero
 from gpflow.config import default_float, default_jitter
+from gpflow.utilities import set_trainable
 from layers import SVGPLayer
 
 gpflow.config.set_default_float(np.float64)
@@ -108,31 +109,45 @@ class DGP(DGPBase):
     """The Doubly-Stochastic Deep GP, with linear/identity mean functions at
     each layer."""
     
-    def __init__(self, dim_in, kernels, likelihood, inducing_variables, 
-            num_outputs, mean_function=Zero(), white=False, **kwargs):
+    def __init__(self, X, Y, Z, dims, kernels, likelihood, 
+            mean_function=Zero(), white=False, **kwargs):
 
-        layers = self._init_layers(dim_in, kernels, inducing_variables, 
-                num_outputs=num_outputs, mean_function=mean_function, white=white)
+        layers = self._init_layers(X, Y, Z, dims, kernels, 
+                mean_function=mean_function, white=white)
 
         super().__init__(likelihood, layers, **kwargs)
         
-    def _init_layers(self, dim_in, kernels, inducing_variables, num_outputs=None, 
-            mean_function=Zero(), Layer=SVGPLayer, white=False):
+    def _init_layers(self, X, Y, Z, dims, kernels, mean_function=Zero(),
+            Layer=SVGPLayer, white=False):
         """Initialise DGP layers to have the same number of outputs as inputs,
         apart from the final layer."""
         layers = []
-        
-        # Add layers
-        for kern in kernels[:-1]:
-            mf = Identity()
-            # Initialise layers dim_out=dim_in
-            # Use Identity mean function when input and output dimensions
-            # are the same.
-            layers.append(Layer(kern, inducing_variables, dim_in, mf, 
-                white=white))
 
-        layers.append(Layer(kernels[-1], inducing_variables, num_outputs,
-            mean_function, white=white))
+        X_running, Z_running = X.copy(), Z.copy()
+        for i in range(len(kernels)-1):
+            dim_in, dim_out, kern = dims[i], dims[i+1], kernels[i]
+            if dim_in == dim_out:
+                mf = Identity()
+
+            else:
+                if dim_in > dim_out:
+                    _, _, V = np.linalg.svd(X_running, full_matrices=False)
+                    W = V[:dim_out, :].T
+
+                else:
+                    W = np.concatenate([np.eye(dim_in), np.zeros((dim_in, 
+                        dim_out - dim_in))], 1)
+
+                mf = Linear(W)
+                set_trainable(mf.A, False)
+                set_trainable(mf.b, False)
+
+            layers.append(Layer(kern, Z_running, dim_out, mf, white=white))
+
+            if dim_in != dim_out:
+                Z_running = Z_running.dot(W)
+                X_running = X_running.dot(W)
+
+        layers.append(Layer(kernels[-1], Z_running, dims[-1], mean_function, 
+            white=white))
         return layers
-
-            
