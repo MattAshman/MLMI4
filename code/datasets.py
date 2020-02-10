@@ -240,8 +240,12 @@ class Year(Dataset):
             with ZipFile(BytesIO(zipresp.read())) as zfile:
                 zfile.extractall('/tmp/')
 
+<<<<<<< HEAD
         data = pandas.read_csv('/tmp/YearPredictionMSD.txt', sep=',', 
                 header=None).values
+=======
+        data = pandas.read_fwf('/tmp/YearPredictionMSD.txt', header=None).values
+>>>>>>> c4a4e0fe05e392013cdcdca41cc0c2969de68c70
         data = data[:, :-1]
 
         with open(self.csv_file_path(self.name), 'w') as f:
@@ -254,7 +258,14 @@ class Year(Dataset):
         Y = full_data['Y'][:self.N, :]
         Ys = full_data['Y'][self.N:, :]
 
+<<<<<<< HEAD
         return {'X':X, 'Xs':Xs, 'Y':Y, 'Ys':Ys}
+=======
+        return {'X': X, 'Xs':Xs, 'Y':Y, 'Ys':Ys}
+
+
+
+>>>>>>> c4a4e0fe05e392013cdcdca41cc0c2969de68c70
 
 class Datasets(object):
     def __init__(self, data_path='/data/'):

@@ -1,6 +1,7 @@
 # Ignore virtual environment files
 *-env
 */__pycache__/*
+gcloud-mlmi4-env/*
 
 # Ignore dataset files
 data/
@@ -14,3 +15,7 @@ tmp/
 
 # Ignore backups
 *~
+gcloud*
+
+# Ignore .pyc files
+*.pyc
