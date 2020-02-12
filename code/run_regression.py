@@ -128,7 +128,7 @@ def main(args):
             vars.append(v)
 
         mean_SND = np.concatenate(means, 1)
-        var_SDN = np.concatenate(vars, 1)
+        var_SND = np.concatenate(vars, 1)
         mean_ND = np.mean(mean_SND, 0)
         
         test_err = np.mean(Y_std * np.mean((Ys - mean_ND) ** 2.0) ** 0.5)
@@ -139,7 +139,7 @@ def main(args):
         running_err += test_err
 
         test_nll = np.mean(logsumexp(norm.logpdf(Ys * Y_std, mean_SND * Y_std, 
-                var_SDN ** 0.5 * Y_std), 0, b=1 / float(args.test_samples)))
+                var_SND ** 0.5 * Y_std), 0, b=1 / float(args.test_samples)))
         print('Average test log likelihood: {}'.format(test_nll))
         outfile2.write('Split {}: {}\n'.format(i+1, test_nll))
         outfile2.flush()
