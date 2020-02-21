@@ -45,7 +45,7 @@ def main(args):
     for i in range(args.splits):
         print('Split: {}'.format(i))
         print('Getting dataset...')
-        data = datasets.all_datasets[args.dataset].get_data(i)
+        data = datasets.all_datasets[args.dataset].get_data(i, normalize=args.normalize_data)
         X, Y, Xs, Ys, Y_std = [data[_] for _ in ['X', 'Y', 'Xs', 'Ys', 'Y_std']]
         Z = kmeans2(X, args.num_inducing, minit='points')[0]
 
@@ -182,6 +182,8 @@ if __name__ == '__main__':
         help='Batch size to apply to test data.')
     parser.add_argument('--max_dim', type=int, default=30,
         help='Maximum dimension of latent variables.')
+    parser.add_argument('--normalize_data', type=bool, default=True,
+        help='Whether or not to normalize the data.')
 
     args = parser.parse_args()
     main(args)

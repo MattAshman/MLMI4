@@ -43,17 +43,26 @@ class Dataset(object):
     def download_data(self):
         NotImplementedError
 
-    def get_data(self, seed=0, split=0, prop=0.9):
+    def get_data(self, seed=0, split=0, prop=0.9, normalize=True):
         path = self.csv_file_path(self.name)
         if not os.path.isfile(path):
             self.download_data()
 
         full_data = self.read_data()
         split_data = self.split(full_data, seed, split, prop)
-        split_data = self.normalize(split_data, 'X')
+        if normalize:
+            split_data = self.normalize(split_data, 'X')
+        else:
+            split_data.update({'X_mean': np.zeros(X.shape[0])})
+            split_data.update({'X_std': np.ones(X.shape[0])})
+
 
         if self.type is 'regression':
-            split_data = self.normalize(split_data, 'Y')
+            if normalize:
+                split_data = self.normalize(split_data, 'Y')
+            else:
+                split_data.update({'Y_mean': np.zeros(Y.shape[0])})
+                split_data.update({'Y_std': np.ones(Y.shape[0])})
 
         return split_data
 
