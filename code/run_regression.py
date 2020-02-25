@@ -42,6 +42,9 @@ def main(args):
     running_err = 0
     running_loss = 0
     running_time = 0
+    test_errs = np.zeros(args.splits)
+    test_nlls = np.zeros(args.splits)
+    test_times = np.zeros(args.splits)
     for i in range(args.splits):
         print('Split: {}'.format(i))
         print('Getting dataset...')
@@ -106,6 +109,7 @@ def main(args):
                 iterations=args.iterations, 
                 logging_iter_freq=args.logging_iter_freq)
         t1 = time.time()
+        test_times[i] = t1 - t0
         print('Time taken to train: {}'.format(t1 - t0))
         outfile3.write('Split {}: {}\n'.format(i+1, t1-t0))
         outfile3.flush()
@@ -132,6 +136,7 @@ def main(args):
         mean_ND = np.mean(mean_SND, 0)
         
         test_err = np.mean(Y_std * np.mean((Ys - mean_ND) ** 2.0) ** 0.5)
+        test_errs[i] = test_err
         print('Average RMSE: {}'.format(test_err))
         outfile1.write('Split {}: {}\n'.format(i+1, test_err))
         outfile1.flush()
@@ -140,6 +145,7 @@ def main(args):
 
         test_nll = np.mean(logsumexp(norm.logpdf(Ys * Y_std, mean_SND * Y_std, 
                 var_SND ** 0.5 * Y_std), 0, b=1 / float(args.test_samples)))
+        test_nlls[i] = test_nll
         print('Average test log likelihood: {}'.format(test_nll))
         outfile2.write('Split {}: {}\n'.format(i+1, test_nll))
         outfile2.flush()
@@ -147,8 +153,11 @@ def main(args):
         running_loss += test_nll
     
     outfile1.write('Average: {}\n'.format(running_err / args.splits))
+    outfile1.write('Standard deviation: {}\n'.format(np.std(test_errs)))
     outfile2.write('Average: {}\n'.format(running_loss / args.splits))
+    outfile2.write('Standard deviation: {}\n'.format(np.std(test_nlls)))
     outfile3.write('Average: {}\n'.format(running_time / args.splits))
+    outfile3.write('Standard deviation: {}\n'.format(np.std(test_times)))
     outfile1.close()
     outfile2.close()
     outfile3.close()

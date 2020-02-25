@@ -243,6 +243,11 @@ class Year(Dataset):
         self.name, self.N, self.D = 'year', 463810, 90
         self.type = 'regression'
 
+    def read_data(self):
+        data = pandas.read_csv(self.csv_file_path(self.name), 
+                               header=None, delimiter=',').values
+        return {'X':data[:, 1:], 'Y':data[:, 0, None]}
+
     def download_data(self):
 
         url = '{}{}'.format(uci_base, '00203/YearPredictionMSD.txt.zip')
