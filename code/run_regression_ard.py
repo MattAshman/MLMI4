@@ -27,15 +27,15 @@ def main(args):
     datasets = Datasets(data_path=args.data_path)
 
     # Prepare output files
-    outname1 = '../tmp/' + args.dataset + '_' + str(args.num_layers) + '_'\
+    outname1 = args.results_dir + args.dataset + '_' + str(args.num_layers) + '_'\
             + str(args.num_inducing) + '.rmse'
     if not os.path.exists(os.path.dirname(outname1)):
         os.makedirs(os.path.dirname(outname1))
     outfile1 = open(outname1, 'w')
-    outname2 = '../tmp/' + args.dataset + '_' + str(args.num_layers) + '_'\
+    outname2 = args.results_dir + args.dataset + '_' + str(args.num_layers) + '_'\
             + str(args.num_inducing) + '.nll'
     outfile2 = open(outname2, 'w')
-    outname3 = '../tmp/' + args.dataset + '_' + str(args.num_layers) + '_'\
+    outname3 = args.results_dir + args.dataset + '_' + str(args.num_layers) + '_'\
             + str(args.num_inducing) + '.time'
     outfile3 = open(outname3, 'w')
 
@@ -63,9 +63,13 @@ def main(args):
         for l in range(args.num_layers):
             kernels.append(SquaredExponential() + White(variance=1e-5))
             if l == 0:
-                dims.append(X.shape[1])
+                dim = X.shape[1]
+                dims.append(dims)
             else:
-                dims.append(hidden_dim)
+                dim = hidden_dim
+                dims.append(dim)
+            kernels.append(SquaredExponential(lengthscale=[1.]*dim) + White(variance=1e-5))
+
         dims.append(Y.shape[1])
 
         dgp_model = DGP(X, Y, Z, dims, kernels, Gaussian(variance=0.05),
@@ -185,6 +189,8 @@ if __name__ == '__main__':
         help='Maximum dimension of latent variables.')
     parser.add_argument('--normalize_data', type=bool, default=True,
         help='Whether or not to normalize the data.')
+    parser.add_argument('--results_dir', default='../tmp/',
+            help='Directory results are written to.')
 
     args = parser.parse_args()
     main(args)
