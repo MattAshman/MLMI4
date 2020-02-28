@@ -61,10 +61,9 @@ def main(args):
         dims = []
         hidden_dim = X.shape[1] if X.shape[1] < args.max_dim else args.max_dim
         for l in range(args.num_layers):
-            kernels.append(SquaredExponential() + White(variance=1e-5))
             if l == 0:
                 dim = X.shape[1]
-                dims.append(dims)
+                dims.append(dim)
             else:
                 dim = hidden_dim
                 dims.append(dim)
@@ -74,7 +73,6 @@ def main(args):
 
         dgp_model = DGP(X, Y, Z, dims, kernels, Gaussian(variance=0.05),
                 num_samples=args.num_samples, num_data=X.shape[0])
-        pdb.set_trace()
 
         # initialise inner layers almost deterministically
         for layer in dgp_model.layers[:-1]:
