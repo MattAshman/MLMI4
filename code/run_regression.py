@@ -73,7 +73,6 @@ def main(args):
 
         dgp_model = DGP(X, Y, Z, dims, kernels, Gaussian(variance=0.05),
                 num_samples=args.num_samples, num_data=X.shape[0])
-        pdb.set_trace()
 
         # initialise inner layers almost deterministically
         for layer in dgp_model.layers[:-1]:
