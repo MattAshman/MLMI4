@@ -35,7 +35,7 @@ def main(args):
     def optimisation_step(model, X, Y, optimizer):
         with tf.GradientTape() as tape:
             tape.watch(model.trainable_variables)
-            obj = - model.elbo((X, Y))
+            obj = - model.elbo(X, Y)
             grads = tape.gradient(obj, model.trainable_variables)
         optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
@@ -51,7 +51,7 @@ def main(args):
             iter_id = i + 1
             if iter_id % logging_iter_freq == 0:
                 print('Epoch {}: ELBO (batch) {}'.format(iter_id,
-                                                         model.elbo((X, Y))))
+                                                         model.elbo(X, Y)))
 
     running_err = 0
     running_loss = 0
@@ -105,12 +105,12 @@ def main(args):
                 means.append(m)
                 vars.append(v)
         else:
-            m, v = dgp_model.predict_y(Xs)
+            m, v = model.predict_y(Xs)
             means.append(m)
             vars.append(v)
 
-        mean_ND = np.concatenate(means, 1)
-        var_ND = np.concatenate(vars, 1)
+        mean_ND = np.concatenate(means, 0)
+        var_ND = np.concatenate(vars, 0)
 
         test_err = np.mean(Y_std * np.mean((Ys - mean_ND) ** 2.0) ** 0.5)
         test_errs[i] = test_err
