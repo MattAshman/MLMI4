@@ -1,3 +1,4 @@
+# Ignore poster
 *poster*
 
 # Ignore virtual environment files
@@ -7,22 +8,17 @@ gcloud-mlmi4-env/*
 
 # Ignore dataset files
 data/
-tmp/
+*tmp
 
 # Not sure what these files are. Don't want them.
 *.DS_store
 
-<<<<<<< HEAD
 # Ignore bash scripts
 *.sh*
 
 # Ignore backups
 *~
 gcloud*
-
-=======
-gcloud*
->>>>>>> c4a4e0fe05e392013cdcdca41cc0c2969de68c70
 
 geepee/
 
