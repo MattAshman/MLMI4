@@ -8,7 +8,7 @@ gcloud-mlmi4-env/*
 
 # Ignore dataset files
 data/
-*tmp
+*tmp*
 
 # Not sure what these files are. Don't want them.
 *.DS_store
