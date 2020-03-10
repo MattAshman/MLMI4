@@ -1,3 +1,4 @@
+import copy
 import pdb
 import numpy as np
 import tensorflow as tf
@@ -194,4 +195,143 @@ class SVGPLayer(Layer):
         return kullback_leiblers.prior_kl(self.inducing_points, self.kernel,
                 self.q_mu, self.q_sqrt, whiten=self.white)
 
+class SVGPIndependentLayer(Layer):
+    """A sparse variational GP layer in whitened representation. This layer 
+    holds the kernel, variational parameters, inducing point and mean
+    function.
+
+    The underlying model at inputs X is:
+    f = Lv + mean_function(X), where v ~ N(0,I) and LL^T = kernel.K(X).
+
+    The variational distribution over the inducing points is:
+    q(u) = N(u; q_mu, L_qL_q^T), where L_qL_q^T = q_var.
+
+    The layer holds D_out independent GPs with independent kernels and 
+    inducing points.
+
+    :kernel: A gpflow.kernel, the kernel for the layer.
+    :inducing_variables: A tensor, the inducing points. [M,D_in]
+    :num_outputs: The number of GP outputs.
+    :mean_function: A gpflow.mean_function, the mean function for the layer.
+    """
+
+    def __init__(self, kernel, inducing_variables, num_outputs, mean_function,
+        input_prop_dim=None, white=False, **kwargs):
+        super().__init__(input_prop_dim, **kwargs)
+
+        self.num_inducing = inducing_variables.shape[0]
+        self.mean_function = mean_function
+        self.num_outputs = num_outputs
+        self.white = white
+
+        self.kernels = []
+        for i in range(self.num_outputs):
+            self.kernels.append(copy.deepcopy(kernel))
+
+         # Initialise q_mu to all zeros
+        q_mu = np.zeros((self.num_inducing, num_outputs))
+        self.q_mu = Parameter(q_mu, dtype=default_float())
+
+        # Initialise q_sqrt to identity function
+        #q_sqrt = tf.tile(tf.expand_dims(tf.eye(self.num_inducing, 
+        #    dtype=default_float()), 0), (num_outputs, 1, 1))
+        q_sqrt = [np.eye(self.num_inducing, dtype=default_float()) for _ in 
+                range(num_outputs)]
+        q_sqrt = np.array(q_sqrt)
+        # Store as lower triangular matrix L.
+        self.q_sqrt = Parameter(q_sqrt, transform=triangular())
+
+        # Initialise to prior (Ku) + jitter.
+        if not self.white:
+            Kus = [self.kernels[i].K(inducing_variables) for i in range(self.num_outputs)]
+            Lus = [np.linalg.cholesky(Kus[i] + np.eye(self.num_inducing) * 
+                default_jitter()) for i in range(self.num_outputs)]
+            q_sqrt = Lus
+            q_sqrt = np.array(q_sqrt)
+            self.q_sqrt = Parameter(q_sqrt, transform=triangular())
+
+ 
+        self.inducing_points = []
+        for i in range(self.num_outputs):
+            self.inducing_points.append(inducingpoint_wrapper(inducing_variables))
+        
+    def conditional_ND(self, X, full_cov=False):
+        # X is [S,N,D]
+        Kmm_tiled = tf.convert_to_tensor(
+            [Kuu(self.inducing_points[i], self.kernels[i], 
+            jitter=default_jitter()) for i in range(self.num_outputs)]
+            )
+        Lmm_tiled = tf.convert_to_tensor(
+            [tf.linalg.cholesky(Kmm_tiled[i]) for i in range(self.num_outputs)]
+            )
+
+        A_tiled = []
+        mean_tiled = []
+        for i in range(self.num_outputs):
+            Kmn = Kuf(self.inducing_points[i], self.kernels[i], X)
+            Lmm = Lmm_tiled[i]
+
+            A = tf.linalg.triangular_solve(Lmm, Kmn, lower=True) # L^{-1}k(Z,X)
+            if not self.white:
+                # L^{-T}L^{-1}K(Z,X) is [M,N]
+                A = tf.linalg.triangular_solve(tf.transpose(Lmm), A, lower=False)
+            
+            # m = alpha(X)^T(q_mu - m(Z)) = alpha(X)^T(q_mu) if zero mean function.
+            mean = tf.linalg.matvec(A, self.q_mu[:, i], transpose_a=True) # [N]
+
+            A_tiled.append(A)
+            mean_tiled.append(mean)
+
+        A_tiled = tf.convert_to_tensor(A_tiled)
+        mean_tiled = tf.transpose(tf.convert_to_tensor(mean_tiled))
+ 
+
+        I = tf.eye(self.num_inducing, dtype=default_float())[None, :, :]
+       
+        # var = k(X,X) - alpha(X)^T(k(Z,Z)-q_sqrtq_sqrt^T)alpha(X)
+        if self.white:
+            SK = -I
+        else:
+            # -k(Z,Z)
+            SK = -Kmm_tiled # [D_out,M,M]
+
+        if self.q_sqrt is not None:
+            # SK = -k(Z,Z) + q_sqrtq_sqrt^T
+            # [D_out,M,M]
+            SK += tf.matmul(self.q_sqrt, self.q_sqrt, transpose_b=True) 
+        
+        # B = -(k(Z,Z) - q_sqrtq_sqrt^T)alpha(X)
+        B = tf.matmul(SK, A_tiled) # [D_out,M,N]
+
+        if full_cov:
+            # delta_cov = -alpha(X)^T(k(Z,Z) - q_sqrtq_sqrt^T)alpha(X)
+            delta_cov = tf.matmul(A_tiled, B, transpose_a=True) # [D_out,N,N]
+            # Knn = k(X,X)
+            Knn = tf.convert_to_tensor([self.kernels[i].K(X) 
+                for i in range(self.num_outputs)])
+        else:
+            # Summing over dimension 1 --> sum variances due to other.
+            # Is this legit?
+            delta_cov = tf.reduce_sum(A_tiled * B, 1)
+            #delta_cov = tf.linalg.diag_part(tf.matmul(A_tiled, B, 
+            #    transpose_a=True)) # [D_out,N]
+            Knn = tf.convert_to_tensor([self.kernels[i].K_diag(X)
+                for i in range(self.num_outputs)])
+
+        var = Knn + delta_cov # [D_out,N]
+        var = tf.transpose(var)
+       
+        return mean_tiled + self.mean_function(X), var
+
+    def KL(self):
+        """The KL divergence from variational distribution to the prior."""
+        KL = 0
+        for i in range(self.num_outputs):
+            q_mu = tf.expand_dims(self.q_mu[:, i], 1)
+            q_sqrt = tf.expand_dims(self.q_sqrt[i], 0)
+            KL += kullback_leiblers.prior_kl(self.inducing_points[i], 
+                    self.kernels[i], q_mu, q_sqrt,
+                    whiten=self.white)
+        
+        return KL
 
