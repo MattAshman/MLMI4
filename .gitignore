@@ -1,10 +1,26 @@
+# Ignore poster
+*poster*
+
 # Ignore virtual environment files
-mlmi4-env/*
+*-env
 */__pycache__/*
+gcloud-mlmi4-env/*
 
 # Ignore dataset files
 data/
-tmp/
+*tmp*
 
 # Not sure what these files are. Don't want them.
 *.DS_store
+
+# Ignore bash scripts
+*.sh*
+
+# Ignore backups
+*~
+gcloud*
+
+geepee/
+
+# Ignore output files.
+*.out

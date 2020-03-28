@@ -28,20 +28,27 @@ def main(args):
 
     # Prepare output files
     outname1 = '../tmp/' + args.dataset + '_' + str(args.num_layers) + '_'\
-            + str(args.num_inducing) + '.nll'
+            + str(args.num_inducing) + '.rmse'
     if not os.path.exists(os.path.dirname(outname1)):
         os.makedirs(os.path.dirname(outname1))
     outfile1 = open(outname1, 'w')
     outname2 = '../tmp/' + args.dataset + '_' + str(args.num_layers) + '_'\
-            + str(args.num_inducing) + '.time'
+            + str(args.num_inducing) + '.nll'
     outfile2 = open(outname2, 'w')
+    outname3 = '../tmp/' + args.dataset + '_' + str(args.num_layers) + '_'\
+            + str(args.num_inducing) + '.time'
+    outfile3 = open(outname3, 'w')
 
+    running_err = 0
     running_loss = 0
     running_time = 0
+    test_errs = np.zeros(args.splits)
+    test_nlls = np.zeros(args.splits)
+    test_times = np.zeros(args.splits)
     for i in range(args.splits):
         print('Split: {}'.format(i))
         print('Getting dataset...')
-        data = datasets.all_datasets[args.dataset].get_data(i)
+        data = datasets.all_datasets[args.dataset].get_data(i, normalize=args.normalize_data)
         X, Y, Xs, Ys, Y_std = [data[_] for _ in ['X', 'Y', 'Xs', 'Ys', 'Y_std']]
         Z = kmeans2(X, args.num_inducing, minit='points')[0]
 
@@ -54,12 +61,18 @@ def main(args):
 
         print('Setting up DGP model...')
         kernels = []
+        dims = []
+        hidden_dim = X.shape[1] if X.shape[1] < args.max_dim else args.max_dim
         for l in range(args.num_layers):
             kernels.append(SquaredExponential() + White(variance=1e-5))
+            if l == 0:
+                dims.append(X.shape[1])
+            else:
+                dims.append(hidden_dim)
+        dims.append(Y.shape[1])
 
-        dgp_model = DGP(X.shape[1], kernels, Gaussian(variance=0.05), Z, 
-                num_outputs=Y.shape[1], num_samples=args.num_samples,
-                num_data=X.shape[0])
+        dgp_model = DGP(X, Y, Z, dims, kernels, Gaussian(variance=0.05),
+                num_samples=args.num_samples, num_data=X.shape[0])
 
         # initialise inner layers almost deterministically
         for layer in dgp_model.layers[:-1]:
@@ -87,7 +100,8 @@ def main(args):
 
                 iter_id = i + 1
                 if iter_id % logging_iter_freq == 0:
-                    tf.print(f'Epoch {iter_id}: ELBO (batch) {model.elbo(X, Y)}')
+                    print('Epoch {}: ELBO (batch) {}'.format(iter_id,
+                        model.elbo(X, Y)))
 
         print('Training DGP model...')
         t0 = time.time()
@@ -95,29 +109,62 @@ def main(args):
                 iterations=args.iterations, 
                 logging_iter_freq=args.logging_iter_freq)
         t1 = time.time()
+        test_times[i] = t1 - t0
         print('Time taken to train: {}'.format(t1 - t0))
-        outfile2.write('Split {}: {}\n'.format(i+1, t1-t0))
-        outfile2.flush()
-        os.fsync(outfile2.fileno())
+        outfile3.write('Split {}: {}\n'.format(i+1, t1-t0))
+        outfile3.flush()
+        os.fsync(outfile3.fileno())
         running_time += t1 - t0
+
+        # Minibatch test predictions
+        means, vars = [], []
+        test_batch_size = args.test_batch_size
+        if len(Xs) > test_batch_size:
+            for mb in range(-(-len(Xs) // test_batch_size)):
+                m, v = dgp_model.predict_y(
+                        Xs[mb*test_batch_size:(mb+1)*test_batch_size, :],
+                        num_samples=args.test_samples)
+                means.append(m)
+                vars.append(v)
+        else:
+            m, v = dgp_model.predict_y(Xs, num_samples=args.test_samples)
+            means.append(m)
+            vars.append(v)
+
+        mean_SND = np.concatenate(means, 1)
+        var_SND = np.concatenate(vars, 1)
+        mean_ND = np.mean(mean_SND, 0)
         
-        m, v = dgp_model.predict_y(Xs, num_samples=args.test_samples)
-        test_nll = np.mean(logsumexp(norm.logpdf(Ys * Y_std, m * Y_std, 
-                v ** 0.5 * Y_std), 0, b=1 / float(args.test_samples)))
-        print('Average test log likelihood: {}'.format(test_nll))
-        outfile1.write('Split {}: {}\n'.format(i+1, test_nll))
+        test_err = np.mean(Y_std * np.mean((Ys - mean_ND) ** 2.0) ** 0.5)
+        test_errs[i] = test_err
+        print('Average RMSE: {}'.format(test_err))
+        outfile1.write('Split {}: {}\n'.format(i+1, test_err))
         outfile1.flush()
         os.fsync(outfile1.fileno())
-        running_loss += t1 - t0
+        running_err += test_err
+
+        test_nll = np.mean(logsumexp(norm.logpdf(Ys * Y_std, mean_SND * Y_std, 
+                var_SND ** 0.5 * Y_std), 0, b=1 / float(args.test_samples)))
+        test_nlls[i] = test_nll
+        print('Average test log likelihood: {}'.format(test_nll))
+        outfile2.write('Split {}: {}\n'.format(i+1, test_nll))
+        outfile2.flush()
+        os.fsync(outfile2.fileno())
+        running_loss += test_nll
     
-    outfile1.write('Average: {}\n'.format(running_loss / args.splits))
-    outfile2.write('Average: {}\n'.format(running_time / args.splits))
+    outfile1.write('Average: {}\n'.format(running_err / args.splits))
+    outfile1.write('Standard deviation: {}\n'.format(np.std(test_errs)))
+    outfile2.write('Average: {}\n'.format(running_loss / args.splits))
+    outfile2.write('Standard deviation: {}\n'.format(np.std(test_nlls)))
+    outfile3.write('Average: {}\n'.format(running_time / args.splits))
+    outfile3.write('Standard deviation: {}\n'.format(np.std(test_times)))
     outfile1.close()
     outfile2.close()
+    outfile3.close()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--splits', default=20, 
+    parser.add_argument('--splits', default=20, type=int, 
         help='Number of cross-validation splits.')
     parser.add_argument('--data_path', default='../data/', 
         help='Path to datafile.')
@@ -140,6 +187,12 @@ if __name__ == '__main__':
         help='Minibatch size.')
     parser.add_argument('--test_samples', type=int, default=100, 
         help='Number of test samples to use.')
+    parser.add_argument('--test_batch_size', type=int, default=100,
+        help='Batch size to apply to test data.')
+    parser.add_argument('--max_dim', type=int, default=30,
+        help='Maximum dimension of latent variables.')
+    parser.add_argument('--normalize_data', type=bool, default=True,
+        help='Whether or not to normalize the data.')
 
     args = parser.parse_args()
     main(args)

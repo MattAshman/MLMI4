@@ -14,11 +14,13 @@
 
 import numpy as np
 import os
+import pdb
 import pandas
 
-from io import BytesIO
+from io import BytesIO, StringIO
 from urllib.request import urlopen
 from zipfile import ZipFile
+from scipy.io import arff
 
 import csv
 
@@ -41,17 +43,26 @@ class Dataset(object):
     def download_data(self):
         NotImplementedError
 
-    def get_data(self, seed=0, split=0, prop=0.9):
+    def get_data(self, seed=0, split=0, prop=0.9, normalize=True):
         path = self.csv_file_path(self.name)
         if not os.path.isfile(path):
             self.download_data()
 
         full_data = self.read_data()
         split_data = self.split(full_data, seed, split, prop)
-        split_data = self.normalize(split_data, 'X')
+        if normalize:
+            split_data = self.normalize(split_data, 'X')
+        else:
+            split_data.update({'X_mean': np.zeros(X.shape[0])})
+            split_data.update({'X_std': np.ones(X.shape[0])})
+
 
         if self.type is 'regression':
-            split_data = self.normalize(split_data, 'Y')
+            if normalize:
+                split_data = self.normalize(split_data, 'Y')
+            else:
+                split_data.update({'Y_mean': np.zeros(Y.shape[0])})
+                split_data.update({'Y_std': np.ones(Y.shape[0])})
 
         return split_data
 
@@ -135,9 +146,10 @@ class Kin8mn(Dataset):
 
     def download_data(self):
 
-        url = 'http://mldata.org/repository/data/download/csv/uci-20070111-kin8nm'
-
-        data = pandas.read_csv(url, header=None).values
+        url = ' https://www.openml.org/data/download/3626/dataset_2175_kin8nm.arff'
+        ftpstream = urlopen(url)
+        data, meta = arff.loadarff(StringIO(ftpstream.read().decode(
+            'utf-8')))
 
         with open(self.csv_file_path(self.name), 'w') as f:
             csv.writer(f).writerows(data)
@@ -226,6 +238,39 @@ class WineWhite(Dataset):
         with open(self.csv_file_path(self.name), 'w') as f:
             csv.writer(f).writerows(data)
 
+class Year(Dataset):
+    def __init__(self):
+        self.name, self.N, self.D = 'year', 463810, 90
+        self.type = 'regression'
+
+    def read_data(self):
+        data = pandas.read_csv(self.csv_file_path(self.name), 
+                               header=None, delimiter=',').values
+        return {'X':data[:, 1:], 'Y':data[:, 0, None]}
+
+    def download_data(self):
+
+        url = '{}{}'.format(uci_base, '00203/YearPredictionMSD.txt.zip')
+
+        with urlopen(url) as zipresp:
+            with ZipFile(BytesIO(zipresp.read())) as zfile:
+                zfile.extractall('/tmp/')
+
+        data = pandas.read_csv('/tmp/YearPredictionMSD.txt', sep=',', 
+                header=None).values
+        data = data[:, :-1]
+
+        with open(self.csv_file_path(self.name), 'w') as f:
+            csv.writer(f).writerows(data)
+
+    def split(self, full_data, seed, split, prop):
+        X = full_data['X'][:self.N, :]
+        Xs = full_data['X'][self.N:, :]
+
+        Y = full_data['Y'][:self.N, :]
+        Ys = full_data['Y'][self.N:, :]
+
+        return {'X':X, 'Xs':Xs, 'Y':Y, 'Ys':Ys}
 
 class Datasets(object):
     def __init__(self, data_path='/data/'):
@@ -243,6 +288,7 @@ class Datasets(object):
         datasets.append(Protein())
         datasets.append(WineRed())
         datasets.append(WineWhite())
+        datasets.append(Year())
 
         self.all_datasets = {}
         for d in datasets:
