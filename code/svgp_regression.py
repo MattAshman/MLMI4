@@ -19,40 +19,45 @@ from scipy.special import logsumexp
 
 from datasets import Datasets
 
+def optimisation_step(model, X, Y, optimiser):
+    with tf.GradientTape() as tape:
+        tape.watch(model.trainable_variables)
+        obj = - model.elbo(X, Y)
+        grads = tape.gradient(obj, model.trainable_variables)
+    optimiser.apply_gradients(zip(grads, model.trainable_variables))
+
+def monitored_training_loop(model, train_dataset, optimiser, logdir,
+                            iterations, logging_iter_freq):
+    batches = iter(train_dataset)
+    tf_optimisation_step = tf.function(optimisation_step)
+
+    for i in range(iterations):
+        X, Y = next(batches)
+        tf_optimisation_step(model, X, Y, optimiser)
+
+        iter_id = i + 1
+        if iter_id % logging_iter_freq == 0:
+            print('Epoch {}: ELBO (batch) {}'.format(iter_id,
+                                                     model.elbo(X, Y)))
+
 def main(args):
     datasets = Datasets(data_path=args.data_path)
 
-    # Prepare output files
+    # prepare output files
     outname1 = '../svgp_ard_tmp/svgp_ard_' + args.dataset + '_' + str(args.num_inducing) + '.rmse'
     if not os.path.exists(os.path.dirname(outname1)):
         os.makedirs(os.path.dirname(outname1))
     outfile1 = open(outname1, 'w')
+
     outname2 = '../svgp_ard_tmp/svgp_ard_' + args.dataset + '_' + str(args.num_inducing) + '.nll'
     outfile2 = open(outname2, 'w')
+
     outname3 = '../svgp_ard_tmp/svgp_ard)' + args.dataset + '_' + str(args.num_inducing) + '.time'
     outfile3 = open(outname3, 'w')
 
-    def optimisation_step(model, X, Y, optimizer):
-        with tf.GradientTape() as tape:
-            tape.watch(model.trainable_variables)
-            obj = - model.elbo(X, Y)
-            grads = tape.gradient(obj, model.trainable_variables)
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
-
-    def monitored_training_loop(model, train_dataset, logdir, iterations,
-                                logging_iter_freq, optimizer):
-        batches = iter(train_dataset)
-        tf_optimisation_step = tf.function(optimisation_step)
-
-        for i in range(iterations):
-            X, Y = next(batches)
-            tf_optimisation_step(model, X, Y, optimizer)
-
-            iter_id = i + 1
-            if iter_id % logging_iter_freq == 0:
-                print('Epoch {}: ELBO (batch) {}'.format(iter_id,
-                                                         model.elbo(X, Y)))
-
+    # =========================================================================
+    # CROSS-VALIDATION LOOP
+    # =========================================================================
     running_err = 0
     running_loss = 0
     running_time = 0
@@ -60,6 +65,9 @@ def main(args):
     test_nlls = np.zeros(args.splits)
     test_times = np.zeros(args.splits)
     for i in range(args.splits):
+        # =====================================================================
+        # MODEL CONSTRUCTION
+        # =====================================================================
         print('Split: {}'.format(i))
         print('Getting dataset...')
         data = datasets.all_datasets[args.dataset].get_data(i, normalize=args.normalize_data)
@@ -70,24 +78,38 @@ def main(args):
         batch_size = args.batch_size if args.batch_size < X.shape[0]\
             else X.shape[0]
         train_dataset = tf.data.Dataset.from_tensor_slices((X, Y)).repeat()\
-                .prefetch(X.shape[0]//2)\
-                .shuffle(buffer_size=(X.shape[0]//2))\
-                .batch(batch_size)
+            .prefetch(X.shape[0]//2)\
+            .shuffle(buffer_size=(X.shape[0]//2))\
+            .batch(batch_size)
 
         print('Setting up SVGP model...')
-        kernel = SquaredExponential(lengthscale=[1.]*X.shape[1])
+        if args.ard:
+            # SE kernel with lengthscale per dimension
+            kernel = SquaredExponential(lengthscale=[1.] * X.shape[1]) + White(
+                variance=1e-5)
+        else:
+            # SE kernel with single lengthscale
+            kernel = SquaredExponential(lengthscale=1.) + White(variance=1e-5)
         likelihood = Gaussian(variance=0.05)
+
         model = gpflow.models.SVGP(kernel=kernel, likelihood=likelihood,
                                    inducing_variable=Z)
 
+        # =====================================================================
+        # TRAINING
+        # =====================================================================
         print('Training SVGP model...')
-        optimizer = tf.optimizers.Adam(args.learning_rate)
+        optimiser = tf.optimizers.Adam(args.learning_rate)
         t0 = time.time()
-        monitored_training_loop(model, train_dataset, logdir=args.log_dir,
+        monitored_training_loop(model, train_dataset, optimiser=optimiser,
+                                logdir=args.log_dir,
                                 iterations=args.iterations,
-                                logging_iter_freq=args.logging_iter_freq,
-                                optimizer=optimizer)
+                                logging_iter_freq=args.logging_iter_freq)
         t1 = time.time()
+
+        # =====================================================================
+        # TESTING
+        # =====================================================================
         test_times[i] = t1 - t0
         print('Time taken to train: {}'.format(t1 - t0))
         outfile3.write('Split {}: {}\n'.format(i+1, t1-t0))
@@ -95,7 +117,7 @@ def main(args):
         os.fsync(outfile3.fileno())
         running_time += t1 - t0
 
-        # Minibatch test predictions
+        # minibatch test predictions
         means, vars = [], []
         test_batch_size = args.test_batch_size
         if len(Xs) > test_batch_size:
@@ -109,9 +131,10 @@ def main(args):
             means.append(m)
             vars.append(v)
 
-        mean_ND = np.concatenate(means, 0)
-        var_ND = np.concatenate(vars, 0)
+        mean_ND = np.concatenate(means, 0)  # [N, D]
+        var_ND = np.concatenate(vars, 0)    # [N, D]
 
+        # rmse
         test_err = np.mean(Y_std * np.mean((Ys - mean_ND) ** 2.0) ** 0.5)
         test_errs[i] = test_err
         print('Average RMSE: {}'.format(test_err))
@@ -120,6 +143,7 @@ def main(args):
         os.fsync(outfile1.fileno())
         running_err += test_err
 
+        # nll
         test_nll = np.mean(norm.logpdf(Ys * Y_std, mean_ND * Y_std,
             var_ND ** 0.5 * Y_std))
         test_nlls[i] = test_nll
@@ -141,27 +165,30 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+
     parser.add_argument('--splits', default=20, type=int,
-        help='Number of cross-validation splits.')
+                        help='Number of cross-validation splits.')
     parser.add_argument('--data_path', default='../data/',
-        help='Path to datafile.')
+                        help='Path to datafile.')
     parser.add_argument('--dataset', help='Name of dataset to run.')
     parser.add_argument('--num_inducing', type=int, default=100,
-        help='Number of inducing input locations.')
+                        help='Number of inducing input locations.')
     parser.add_argument('--learning_rate', type=float, default=0.01,
-        help='Learning rate for optimiser.')
+                        help='Learning rate for optimiser.')
     parser.add_argument('--iterations', type=int, default=20000,
-        help='Number of training iterations.')
+                        help='Number of training iterations.')
     parser.add_argument('--log_dir', default='./log/',
-        help='Directory log files are written to.')
+                        help='Directory log files are written to.')
     parser.add_argument('--logging_iter_freq', type=int, default=500,
-        help='Number of iterations between training logs.')
+                        elp='Number of iterations between training logs.')
     parser.add_argument('--batch_size', type=int, default=10000,
-        help='Minibatch size.')
+                        help='Minibatch size.')
     parser.add_argument('--test_batch_size', type=int, default=100,
-        help='Batch size to apply to test data.')
+                        help='Batch size to apply to test data.')
     parser.add_argument('--normalize_data', type=bool, default=True,
-        help='Whether or not to normalize the data.')
+                        help='Whether or not to normalize the data.')
+    parser.add_argument('--ard', type=bool, default=True,
+                        help='Whether or not to use ARD lengthscales.')
 
     args = parser.parse_args()
     main(args)
