@@ -1,8 +1,5 @@
 # MLMI4: Advanced Machine Learning
 Implementation of *Doubly Stochastic Variational Inference in Deep Gaussian Processes*. The paper can be found [here](https://arxiv.org/abs/1705.08933).
 
-## TODO:
-* Run the UCI experiments.
-* Implement image completion as in Conditional Neural Processes.
-* Compare performance with Power EP method by Thang Bui.
-* Thoroughly understand both DGPs and Power EP, and how Doubly Stochastic Variational inference for DGPs is a special case of Power EP.
+## Abstract
+Deep Gaussian processes (DGPs) are a recent development in which GPs are combined in a hierarchical composition. Theoretically, DGPs promise to overcome many of the limitations of standard GPs whilst retaining the advantages of being non-parametric and Bayesian. Moreover, they offer a potential solution the the failures of deep neural networks; namely, poorly-calibrated uncertainty estimates and sensitivity to directed adversarial attacks. Unfortunately, inference in DGPs is analytically intractable. In this report, we reproduce the work of Salimbeni and Deisenroth \[2017\]. In their paper, Doubly Stochastic Variational Inference for Deep Gaussian Processes, the authors present a novel method for performing approximate inference in DGPs. We compare the regression and classification performance of doubly stochastic inference (DSVI) for DGPs to standard GPs, and to using approximate expectation propagation (AEP) for inference in DGPs, on several benchmark experiments. Our experiments demonstrate that DGP models often exceed the performance of standard GPs, and rarely perform worse. We extend the results of Salimbeni and Deisenroth, demonstrating the capability of DGPs on image completion tasks, and show that the original results can be improved upon through the use of automatic relevance determination (ARD). Further, we make novel contributions for performing approximate expectation propagation (AEP) in DGPs, extending the results of Bui et al.\ \[2016\] to multi-class classification and non-zero mean functions, and demonstrate the efficacy of our methods.
